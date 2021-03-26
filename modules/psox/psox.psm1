@@ -7,18 +7,21 @@ class psoxTaskResult
 class psoxTask
 {
     [string]$Name
-    [string]$Module
-    [string]$Version
+    [hashtable]$Parameters
     [psoxTaskResult]$result
     [timespan]$ExecutionTime
     [psoxTaskState]$State = [psoxTaskState]::Initialized
+}
+
+class pxDsc : psoxTask
+{
+    
 }
 
 enum psoxTaskState
 {
     Initialized
 }
-
 
 function New-PsoxKeyword
 {
@@ -112,12 +115,18 @@ function Test-PsoxTaskDeclaration
         {
             $taskSpec = $pxTaskSpec[$ta.GetCommandName()]
 
-            #Validate Syntax
-            if ($ta.CommandElements[1] -isnot [System.Management.Automation.Language.StringConstantExpressionAst])
+            #Valridate Syntax
+            if (
+                ($ta.CommandElements[1].StaticType -ne [string]) -and
+                ([string] -isnot $ta.CommandElements[1].StaticType)
+            )
             {
-                $parseErrors.Add([System.Management.Automation.Language.ParseError]::new($ta.Extent, 1, "Missing task name.$([System.Environment]::NewLine)Syntax: $($taskSpec.Syntax)"))
+                $parseErrors.Add([System.Management.Automation.Language.ParseError]::new($ta.Extent, 1, "Missing or invalid task name.$([System.Environment]::NewLine)Syntax: $($taskSpec.Syntax)"))
             }
-            if ($ta.CommandElements[2] -isnot [System.Management.Automation.Language.HashtableAst])
+            if (
+                ($ta.CommandElements[2].StaticType -ne [hashtable]) -and 
+                ([hashtable] -isnot $ta.CommandElements[2].StaticType)
+            )
             {
                 $parseErrors.Add([System.Management.Automation.Language.ParseError]::new($ta.Extent, 1, "Missing task parameters.$([System.Environment]::NewLine)Syntax: $($taskSpec.Syntax)"))
                 throw [System.Management.Automation.ParseException]::new($er)
@@ -136,14 +145,17 @@ function Test-PsoxTaskDeclaration
             {
                 if ($taskSpec.Parameters.ContainsKey($kvp.Item1.Value))
                 {
-                    if ($kvp.Item2.GetPureExpression().StaticType -ne $taskSpec.Parameters[$kvp.Item1.Value].Type)
+                    if (
+                        ($kvp.Item2.GetPureExpression().StaticType -ne $taskSpec.Parameters[$kvp.Item1.Value].Type) -and 
+                        ($taskSpec.Parameters[$kvp.Item1.Value].Type -isnot $kvp.Item2.GetPureExpression().StaticType)
+                    )
                     {
-                        $parseErrors.Add([System.Management.Automation.Language.ParseError]::new($kvp.Item2.Extent, 1, "Invalid task parameter value type: '$($kvp.Item2.GetPureExpression().StaticType)'. Syntax: $($taskSpec.Syntax)"))
+                        $parseErrors.Add([System.Management.Automation.Language.ParseError]::new($kvp.Item2.Extent, 1, "Invalid task parameter value type: '$($kvp.Item2.GetPureExpression().StaticType)'.$([System.Environment]::NewLine)Syntax: $($taskSpec.Syntax)"))
                     }
                 }
                 else
                 {
-                    $parseErrors.Add([System.Management.Automation.Language.ParseError]::new($kvp.Item1.Extent, 1, "Invalid task parameter name: '$($kvp.Item1.Value)'. Syntax: $($taskSpec.Syntax)"))
+                    $parseErrors.Add([System.Management.Automation.Language.ParseError]::new($kvp.Item1.Extent, 1, "Invalid task parameter name: '$($kvp.Item1.Value)'.$([System.Environment]::NewLine)Syntax: $($taskSpec.Syntax)"))
                 }
                 if ($taskSpec.Parameters[$kvp.Item1.Value].Mandatory)
                 {
@@ -178,6 +190,8 @@ function pxScenario
     )
 
     Get-AstStatement -Ast $Body.Ast -Type CommandAst | Where-Object -FilterScript { $pxTaskSpec.ContainsKey($_.GetCommandName()) } | Test-PsoxTaskDeclaration
+
+    & $Body
 }
 
 #region task pxDsc
@@ -192,17 +206,20 @@ function pxDsc
         [Parameter(Mandatory, Position = 1)]
         [hashtable]$Body
     )
+
+    [pxDsc]@{
+        Name       = $Name
+        Parameters = $Body
+    }
 }
 
 $pxDscSpec = @{
     TaskName   = 'pxDsc'
-    Syntax     = @'
-pxDsc <Name> @{
-    Resource   = <Resource Name>
-    [ Module   = <Module Name> ]
-    Properties = @{}
-}
-'@
+    Syntax     = 'pxDsc <[string]Name> @{
+        Resource   = [string]
+        [ Module   = [string] ]
+        Properties = [hashtable]
+    }'
     Parameters = @{
         Resource   = @{
             Mandatory = $true

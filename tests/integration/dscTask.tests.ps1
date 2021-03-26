@@ -9,10 +9,11 @@ if ($modulesFolder -notin ($env:PSModulePath -split $pathSeperator))
 Import-Module -Name psox -Force
 
 pxScenario blq {
-    pxDsc Task1 @{
-        Resource   = 'WindowsFeature'
-        Properties = @{
-
+    foreach ($i in 1,2,3)
+    {
+        pxDsc "Test" @{
+            Resource   = "Feature$i"
+            Properties = @{}
         }
     }
     pxDsc alabala @{
