@@ -54,35 +54,35 @@ class psoxTaskState
 {
     [bool]$InDesiredState
     [bool]$RebootRequired
-    [string]$State = 'Unknown'
+    [bool]$Tested
+    [bool]$Updated
 
     [string]ToString()
     {
-        $result = $this.State
-        $resultDetails = [System.Collections.Generic.List[string]]::new()
+        $result = 'Unknown'
+        if ($this.Updated -and $this.InDesiredState)
+        {
+            $result = 'Remediated'
+        }
+        elseif ($this.Updated -and (-not $this.InDesiredState))
+        {
+            $result = 'Updated'
+        }
+        elseif ($this.Tested -and (-not $this.InDesiredState))
+        {
+            $result = 'NotInDesiredState'
+        }
+        elseif ($this.Tested -and $this.InDesiredState)
+        {
+            $result = 'OK'
+        }
+        
         if ($this.RebootRequired)
         {
-            $resultDetails.Add('RebootRequired')
-        }
-        if (-not $this.InDesiredState)
-        {
-            $resultDetails.Add('NotInDesiredState')
-        }
-        if ($resultDetails.Count -gt 0)
-        {
-            $result += " ($($resultDetails -join ', '))"
+            $result += ' (RebootRequired)'
         }
         return $result
     }
-}
-
-enum psoxTaskStateString
-{
-    Parsed
-    Connected
-    Initialized
-    Tested
-    Changed
 }
 
 class psoxEvent
@@ -433,7 +433,6 @@ class psoxDsc : psoxTask
                 }
             } -ArgumentList $this.Parameters
             $this.LogInformation('Prepare', 'Completed')
-            $this.State.State = 'Prepared'
         }
         catch
         {
@@ -462,8 +461,8 @@ class psoxDsc : psoxTask
             $this.LogInformation('Test', 'Started')
             $res = $this.InvokeDscResource('Test')
             $this.State.InDesiredState = $res.InDesiredState
+            $this.State.Tested = $true
             $this.LogInformation('Test', 'Completed')
-            $this.State.State = 'Tested'
         }
         catch
         {
@@ -480,8 +479,8 @@ class psoxDsc : psoxTask
             {
                 $res = $this.InvokeDscResource('Set')
                 $this.State.RebootRequired = $res.RebootRequired
+                $this.State.Updated = $true
                 $this.LogInformation('Set', 'Completed')
-                $this.State.State = 'Changed'
 
                 #re-testing
                 $this.LogInformation('Set', 'Restarted')

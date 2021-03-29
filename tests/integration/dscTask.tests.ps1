@@ -6,7 +6,7 @@ if ($modulesFolder -notin ($env:PSModulePath -split $pathSeperator))
     Write-Verbose -Message 'Prepending modulesFolder directory to $env:PSModulePath'
     $env:PSModulePath = $modulesFolder, $env:PSModulePath -join $pathSeperator
 }
-Import-Module -Name psox -Force
+Import-Module -Name psox
 
 pxScenario blq {
     $sesParam = @{
@@ -56,4 +56,4 @@ pxScenario blq {
             Ensure    = 'Present'
         }
     }
-} -OutVariable pxVar -Mode Set -InformationAction Continue
+} -OutVariable pxVar -Mode Test -InformationAction Continue
