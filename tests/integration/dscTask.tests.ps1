@@ -1,5 +1,5 @@
 $repoRootFolder = Split-Path -Path $PSScriptRoot -Parent | Split-Path -Parent
-$modulesFolder = Join-Path -Path $repoRootFolder -ChildPath 'modules'
+$modulesFolder = Join-Path -Path $repoRootFolder -ChildPath 'src'
 $pathSeperator = [System.IO.Path]::PathSeparator
 if ($modulesFolder -notin ($env:PSModulePath -split $pathSeperator))
 {
@@ -9,12 +9,15 @@ if ($modulesFolder -notin ($env:PSModulePath -split $pathSeperator))
 Import-Module -Name psox
 
 pxScenario blq {
-    $sesParam = @{
-        Authentication = 'Negotiate'
-        Credential     = [pscredential]::new('GogAdmin', (ConvertTo-SecureString -String 'GogPassword123' -AsPlainText))
-        UseSSL         = $true
-        Port           = 5986
-        SessionOption  = New-PSSessionOption -SkipCACheck -SkipCNCheck
+    $Target = @{
+        Name                = ''
+        PSSessionParameters = @{
+            Authentication = 'Negotiate'
+            Credential     = ''
+            UseSSL         = $true
+            Port           = 5986
+            SessionOption  = New-PSSessionOption -SkipCACheck -SkipCNCheck
+        }
     }
 
     pxDsc "Task1" @{
@@ -32,10 +35,7 @@ pxScenario blq {
         }
     }
     pxDsc "Download Software" @{
-        Target     = @{
-            Name                = '20.46.120.31'
-            PSSessionParameters = $sesParam
-        }
+        Target     = $Target
         Resource   = "xRemoteFile"
         Module     = 'xPSDesiredStateConfiguration'
         Properties = @{
@@ -44,10 +44,7 @@ pxScenario blq {
         }
     }
     pxDsc "Install Software" @{
-        Target     = @{
-            Name                = '20.46.120.31'
-            PSSessionParameters = $sesParam
-        }
+        Target     = $Target
         Resource   = "MsiPackage"
         Module     = 'PSDscResources'
         Properties = @{
