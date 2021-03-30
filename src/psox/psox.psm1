@@ -1,42 +1,17 @@
 using namespace System.Management.Automation
 using namespace System.Management.Automation.Language
 
-class psoxTarget
+class pxTarget
 {
     [string]$DisplayName
     [string]$Name
     [string]$Endpoint
     [string]$ConnectionId
 
-    psoxTarget([hashtable]$Parameters)
-    {
-        $this.Name = $Parameters['Name']
-        if ($Parameters.ContainsKey('Endpoint'))
-        {
-            $this.Endpoint = $Parameters['Endpoint']
-            $this.DisplayName = "$($Parameters['Name'])/$($Parameters['Endpoint'])"
-        }
-        else
-        {
-            $this.Endpoint = $Parameters['Name']
-            $this.DisplayName = $Parameters['Name']
-        }
-
-        $this.InitializeConnectionId()
-    }
-    psoxTarget([string]$Name)
-    {
-        $this.Name = $Name
-        $this.Endpoint = $Name
-        $this.DisplayName = $Name
-
-        $this.InitializeConnectionId()
-    }
-
-    [void]InitializeConnectionId()
+    [void]InitializeConnectionId([hashtable]$Parameters)
     {
         #calculate ConnectionId
-        $connectionParamString = $this.psobject.Properties.Where( { $_.Name -notin 'Name', 'Endpoint', 'DisplayName', 'connectionId' }) | Select-Object -Property Name, Value | ConvertTo-Json -Compress -Depth 2
+        $connectionParamString = $this.psobject.Properties.Where( { $_.Name -notin 'Name', 'Endpoint', 'DisplayName', 'connectionId' }) | Select-Object -Property Name, Value | ConvertTo-Json -Compress -Depth 3
         $enc = [system.Text.Encoding]::UTF8
         $connectionParamStream = [IO.MemoryStream]::new($enc.GetBytes($connectionParamString))
         $connectionParamHash = Get-FileHash -InputStream $connectionParamStream -Algorithm SHA1
@@ -50,7 +25,7 @@ class psoxTarget
 
 }
 
-class psoxTaskState
+class pxTaskState
 {
     [bool]$InDesiredState
     [bool]$RebootRequired
@@ -85,9 +60,9 @@ class psoxTaskState
     }
 }
 
-class psoxEvent
+class pxEvent
 {
-    psoxEvent([string]$Action, [string]$Type, [string]$Data)
+    pxEvent([string]$Action, [string]$Type, [string]$Data)
     {
         $this.Timestamp = [datetime]::Now
         $this.Action = $Action
@@ -100,22 +75,73 @@ class psoxEvent
     [string]$Data
 }
 
-class psoxTask
+class pxTaskName
 {
     [string]$Name
-    [psoxTarget]$Target
-    hidden [hashtable]$Parameters
-    hidden [psobject]$Output
-    hidden [System.Collections.Generic.List[psoxEvent]]$Log = [System.Collections.Generic.List[psoxEvent]]::New()
-    [psoxTaskState]$State = [psoxTaskState]::new()
+    [string]$SourceType
+    [string]$SourceName
 
-    psoxTask ([string]$Name, [hashtable]$Parameters, [type]$TargetType)
+    [string]ToString()
     {
-        $this.Name = $Name
-        $this.Target = $TargetType::new($Parameters.Target)
-        $Parameters.Remove('Target')
-        $this.Parameters = $Parameters
+        $result = $this.Name
+        if ($this.SourceType -and ($this.SourceType -eq 'pxRole'))
+        {
+            $result = "[$($this.SourceName)]$result"
+        }
+        return $result
     }
+}
+
+class pxFatory
+{
+    static [pxTask]CreateTask([string]$Name, [hashtable]$Parameters, [type]$TaskType , [type]$TargetType, [pxExectuionContext]$PsoxExecutionContext)
+    {
+        $result = $TaskType::new()
+        $result.Name.Name = $Name
+        $result.Name.SourceType = $PsoxExecutionContext.CurrentParserType
+        if ($PsoxExecutionContext.CurrentParserName)
+        {
+            $result.Name.SourceName = $PsoxExecutionContext.CurrentParserName
+        }
+        $result.Target = [pxFatory]::CreateTarget($TargetType, $Parameters.Target)
+        $Parameters.Remove('Target')
+        $result.Parameters = $Parameters
+        return $result
+    }
+
+    static [pxTarget]CreateTarget([type]$Type, [hashtable]$Parameters)
+    {
+        $result = $Type::new($Parameters)
+        $result.Name = $Parameters['Name']
+        if ($Parameters.ContainsKey('Endpoint'))
+        {
+            $result.Endpoint = $Parameters['Endpoint']
+            $result.DisplayName = "$($Parameters['Name'])/$($Parameters['Endpoint'])"
+        }
+        else
+        {
+            $result.Endpoint = $Parameters['Name']
+            $result.DisplayName = $Parameters['Name']
+        }
+        $result.InitializeConnectionId($Parameters)
+
+        return $result
+    }
+    static [pxTarget]CreateTarget([type]$Type, [string]$Name)
+    {
+        $result = [pxFatory]::CreateTarget($Type, @{Name = $Name })
+        return $result
+    }
+}
+
+class pxTask
+{
+    [pxTaskName]$Name = [pxTaskName]::new()
+    [pxTarget]$Target
+    hidden [hashtable]$Parameters
+    hidden [object]$Output
+    hidden [System.Collections.Generic.List[pxEvent]]$Log = [System.Collections.Generic.List[pxEvent]]::New()
+    [pxTaskState]$State = [pxTaskState]::new()
 
     [void]Connect()
     {
@@ -139,34 +165,34 @@ class psoxTask
 
     [void]LogError([string]$Action, [string]$Data)
     {
-        $this.Log.Add([psoxEvent]::new($Action, 'Error', $Data))
+        $this.Log.Add([pxEvent]::new($Action, 'Error', $Data))
         throw "$($this.Name)::$($this.Target) - $Action - Error - $Data"
     }
 
     [void]LogInformation([string]$Action, [string]$Data)
     {
-        $this.Log.Add([psoxEvent]::new($Action, 'Information', $Data))
+        $this.Log.Add([pxEvent]::new($Action, 'Information', $Data))
         Write-Information -MessageData "$($this.Name)::$($this.Target) - $Action - $Data"
     }
 }
 
-class psoxConnectionManager
+class pxConnectionManager
 {
     static [bool]ConnectionExist([string]$Id)
     {
-        return [psoxConnectionManager]::ConnectionCache.ContainsKey($Id)
+        return [pxConnectionManager]::ConnectionCache.ContainsKey($Id)
     }
 
     static [void]AddConnection([string]$Id, [psobject]$Connection)
     {
-        [psoxConnectionManager]::ConnectionCache[$Id] = $Connection
+        [pxConnectionManager]::ConnectionCache[$Id] = $Connection
     }
 
     static [psobject]GetConnection([string]$Id)
     {
-        if ([psoxConnectionManager]::ConnectionExist($Id))
+        if ([pxConnectionManager]::ConnectionExist($Id))
         {
-            return [psoxConnectionManager]::ConnectionCache[$Id]
+            return [pxConnectionManager]::ConnectionCache[$Id]
         }
         else
         {
@@ -177,13 +203,66 @@ class psoxConnectionManager
     static [hashtable]$ConnectionCache = @{}
 }
 
+class pxExectuionContext
+{
+    [string]$CurrentParserType
+    [string]$CurrentParserName
+    [string]$RootFolder
+}
+
+function Resolve-PsoxPath
+{
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [string]$Path
+    )
+
+    if ([System.IO.Path]::IsPathFullyQualified($Path))
+    {
+        $fullPath = $Path
+    }
+    else
+    {
+        $fullPath = Join-Path ($pxExecutionContext.RootFolder) -ChildPath $Path
+    }
+    if (Test-Path -Path $fullPath)
+    {
+        $fullPath
+    }
+    else
+    {
+        throw "Path: '$Path' not found"
+    }
+}
+
+function Test-PsoxPath
+{
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [string]$Path
+    )
+    try
+    {
+        $null = Resolve-PsoxPath -Path $Path
+        $true
+    }
+    catch
+    {
+        $false
+    }
+}
+
 function Invoke-PsoxTask
 {
     [CmdletBinding()]
     param
     (
         [Parameter(Mandatory, ValueFromPipeline)]
-        [psoxTask[]]$Task,
+        [pxTask[]]$Task,
 
         [Parameter(Mandatory)]
         [ValidateSet('Test', 'Set')]
@@ -206,15 +285,15 @@ function Invoke-PsoxTask
             #Evaluate runtime parameters
             $taskType = $t.GetType().Name
             $taskSpec = $pxTaskSpec[$taskType]
-            foreach ($p in $t.Parameters.Keys)
+            foreach ($p in $t.Parameters.Keys.Clone())
             {
                 if (($t.Parameters[$p] -is [scriptblock]) -and $taskSpec.Parameters[$p].AllowRuntimeEvaluation)
                 {
-                    $task.Parameters[$p] = $task.Parameters[$p].InvokeWithContext($null, [psvariable]::new('allPxTasks', $Task))
+                    $t.Parameters[$p] = $t.Parameters[$p].InvokeWithContext($null, [psvariable]::new('allPxTasks', $Task)) | Select-Object -First 1
                 }
             }
 
-            #Invoke Initialize
+            #Invoke Prepare
             $t.Prepare()
 
             #Invoke Test
@@ -241,12 +320,10 @@ function Test-PsoxTaskDeclaration
         [Parameter(Mandatory, ValueFromPipeline)]
         [System.Management.Automation.Language.CommandAst[]]$TaskAst
     )
-
     begin
     {
         $parseErrors = [System.Collections.Generic.List[ParseError]]::new()
     }
-    
     process
     {
         foreach ($ta in $TaskAst)
@@ -256,11 +333,11 @@ function Test-PsoxTaskDeclaration
             #Validate Syntax
             if ($ta.CommandElements[1].GetType() -notin [ExpandableStringExpressionAst], [StringConstantExpressionAst])
             {
-                $parseErrors.Add([ParseError]::new($ta.Extent, 1, "Missing or invalid task name.$([System.Environment]::NewLine)Syntax: $($taskSpec.Syntax)"))
+                $parseErrors.Add([ParseError]::new($ta.Extent, 'MissingTaskName', "Missing or invalid task name. Syntax:$([System.Environment]::NewLine)$($taskSpec.Syntax)"))
             }
             if ($ta.CommandElements[2].GetType() -ne [HashtableAst])
             {
-                $parseErrors.Add([ParseError]::new($ta.Extent, 1, "Missing task parameters.$([System.Environment]::NewLine)Syntax: $($taskSpec.Syntax)"))
+                $parseErrors.Add([ParseError]::new($ta.Extent, 1, "Missing task parameters. Syntax:$([System.Environment]::NewLine)$($taskSpec.Syntax)"))
             }
 
             #Validate parameters
@@ -281,12 +358,21 @@ function Test-PsoxTaskDeclaration
                     $kvpPureExp = $kvp.Item2.GetPureExpression()
                     if ($kvpPureExp.GetType() -notin $taskSpec.Parameters[$kvp.Item1.Value].Type)
                     {
-                        $parseErrors.Add([ParseError]::new($kvp.Item2.Extent, 1, "Invalid task parameter construct: '$($kvpPureExp.GetType().Name)'.$([System.Environment]::NewLine)Syntax: $($taskSpec.Syntax)"))
+                        $parseErrors.Add([ParseError]::new($kvp.Item2.Extent, 1, "Invalid task parameter construct: '$($kvpPureExp.GetType().Name)'. Syntax:$([System.Environment]::NewLine)$($taskSpec.Syntax)"))
+                    }
+
+                    #Validate filepath
+                    if ($taskSpec.Parameters[$kvp.Item1.Value].IsFilePath)
+                    {
+                        if (-not (Test-PsoxPath -Path $kvpPureExp.Value))
+                        {
+                            $parseErrors.Add([ParseError]::new($kvp.Item2.Extent, 1, "Invalid task parameter '$($kvp.Item1.Value)' value. File: '$($kvpPureExp.Value)' not found. Syntax:$([System.Environment]::NewLine)$($taskSpec.Syntax)"))
+                        }
                     }
                 }
                 else
                 {
-                    $parseErrors.Add([ParseError]::new($kvp.Item1.Extent, 1, "Invalid task parameter name: '$($kvp.Item1.Value)'.$([System.Environment]::NewLine)Syntax: $($taskSpec.Syntax)"))
+                    $parseErrors.Add([ParseError]::new($kvp.Item1.Extent, 1, "Invalid task parameter name: '$($kvp.Item1.Value)'. Syntax:$([System.Environment]::NewLine)$($taskSpec.Syntax)"))
                 }
                 #mark that mandatory parameter is being used
                 if ($taskSpec.Parameters[$kvp.Item1.Value].Mandatory)
@@ -296,7 +382,7 @@ function Test-PsoxTaskDeclaration
             }
             if ($mandatoryParamsReq.Count -gt 0)
             {
-                $parseErrors.Add([ParseError]::new($ta.CommandElements[2].Extent, 1, "Missing mandatory task parameter: '$($mandatoryParamsReq -join ''', ''')'.$([System.Environment]::NewLine)Syntax: $($taskSpec.Syntax)"))
+                $parseErrors.Add([ParseError]::new($ta.CommandElements[2].Extent, 1, "Missing mandatory task parameter: '$($mandatoryParamsReq -join ''', ''')'. Syntax:$([System.Environment]::NewLine)$($taskSpec.Syntax)"))
             }
         }
     }
@@ -325,6 +411,12 @@ function pxScenario
         [string]$Mode = 'Parse'
     )
 
+    $pxExecutionContext = [pxExectuionContext]@{
+        CurrentParserType = 'pxScenario'
+        CurrentParserName = $Name
+        RootFolder        = Split-Path $Body.File -Parent
+    }
+
     #validate body
     Get-AstStatement -Ast $Body.Ast -Type CommandAst | Where-Object -FilterScript { $pxTaskSpec.ContainsKey($_.GetCommandName()) } | Test-PsoxTaskDeclaration
 
@@ -350,9 +442,198 @@ function pxScenario
             Invoke-PsoxTask -Task $allPsoxTasks -Mode Set
             break
         }
-        
     }
 }
+
+#region target pxWinRMTarget
+
+class pxWinRMTarget : pxTarget
+{
+    [hashtable]$PSSessionParameters = @{}
+
+    pxWinRMTarget([hashtable]$Parameters)
+    {
+        if ($Parameters.ContainsKey('PSSessionParameters'))
+        {
+            $this.PSSessionParameters = $Parameters['PSSessionParameters']
+        }
+    }
+}
+
+$pxWinRMTargetSpec = @{
+    Name   = 'pxWinRMTarget'
+    Syntax = '[string|[hashtable]]'
+    Target = @{
+        Mandatory = $true
+        Type      = [StringConstantExpressionAst], [ExpandableStringExpressionAst], [HashtableAst], [VariableExpressionAst]
+    }
+}
+
+#endregion
+
+#region task pxRole
+
+function pxRole
+{
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory, Position = 0)]
+        [string]$Name,
+
+        [Parameter(Mandatory, Position = 1)]
+        [hashtable]$Body
+    )
+
+    $roleFile = Resolve-PsoxPath -Path $Body.FilePath
+
+    $pxExecutionContext = [pxExectuionContext]@{
+        CurrentParserType = 'pxRole'
+        CurrentParserName = $Name
+        RootFolder        = Split-Path -Path $roleFile -Parent
+    }
+    
+    $roleBody = (Get-Command -Name $roleFile).ScriptBlock
+
+    #validate body
+    Get-AstStatement -Ast $roleBody.Ast -Type CommandAst | Where-Object -FilterScript { $pxTaskSpec.ContainsKey($_.GetCommandName()) } | Test-PsoxTaskDeclaration
+
+    #parse tasks
+    if ($Body.ContainsKey('Parameters'))
+    {
+        $roleParameters = $Body['Parameters']
+        & $roleBody @roleParameters
+    }
+    else
+    {
+        & $roleBody
+    }
+}
+
+$pxRoleSpec = @{
+    TaskName   = 'pxRole'
+    Syntax     = 'pxRole <[string]Name> @{
+    FilePath   = [string]
+    [ Parameters = [hashtable] ]
+}'
+    Parameters = @{
+        FilePath   = @{
+            Mandatory  = $true
+            Type       = [StringConstantExpressionAst]
+            IsFilePath = $true
+        }
+        Parameters = @{
+            Mandatory              = $false
+            type                   = [HashtableAst], [ScriptBlockExpressionAst], [VariableExpressionAst]
+            AllowRuntimeEvaluation = $true
+        }
+    }
+}
+
+#endregion
+
+#region task pxScript
+function pxScript
+{
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory, Position = 0)]
+        [string]$Name,
+
+        [Parameter(Mandatory, Position = 1)]
+        [hashtable]$Body
+    )
+
+    [pxFatory]::CreateTask($Name, $Body, [pxScript] , [pxWinRMTarget], $pxExecutionContext)
+}
+
+class pxScript : pxTask
+{
+    [void]Connect()
+    {
+        try
+        {
+            $this.LogInformation('Connect', 'Started')
+            if (-not [pxConnectionManager]::ConnectionExist($this.Target.ConnectionId))
+            {
+                $newPSSessionParams = @{
+                    ComputerName = $this.Target.Endpoint
+                    Name         = $this.Target.DisplayName
+                } + $this.Target.PSSessionParameters
+                $ses = New-PSSession @newPSSessionParams -ErrorAction Stop
+                Invoke-Command -Session $ses -ScriptBlock { $ProgressPreference = 'SilentlyContinue' }
+                [pxConnectionManager]::AddConnection($this.Target.ConnectionId, $ses)
+                $this.LogInformation('Connect', 'Connected')
+            }
+            else
+            {
+                $this.LogInformation('Connect', 'Already connected')
+            }
+        }
+        catch
+        {
+            $this.LogError('Connect', $_)
+        }
+    }
+
+    [void]Prepare()
+    {
+        $this.LogInformation('Prepare', 'Skipped. This task does not need to prepare anything')
+    }
+
+    [void]Test()
+    {
+        $this.LogInformation('Test', 'Skipped. This task does not need to test anything')
+    }
+
+    [void]Set()
+    {
+        try
+        {
+            $this.LogInformation('Set', 'Started')
+            $scriptFile = Resolve-PsoxPath -Path $this.Parameters['FilePath']
+            if ($this.Parameters.ContainsKey('Parameters'))
+            {
+                $scriptParams = $this.Parameters['Parameters']
+                $this.Output = & $scriptFile @scriptParams
+            }
+            else
+            {
+                $this.Output = & $scriptFile
+            }
+            $this.State.Updated = $true
+            $this.LogInformation('Set', 'Completed')
+        }
+        catch
+        {
+            $this.LogError('Set', $_)
+        }
+    }
+}
+
+$pxScriptSpec = @{
+    TaskName   = 'pxScript'
+    Syntax     = "pxScript <[string]Name> @{
+    Target     = $($pxWinRMTargetSpec.Syntax)
+    FilePath   = [string]
+    [ Parameters = [hashtable] ]
+}"
+    Parameters = @{
+        Target     = $pxWinRMTargetSpec.Target
+        FilePath   = @{
+            Mandatory  = $true
+            Type       = [StringConstantExpressionAst]
+            IsFilePath = $true
+        }
+        Parameters = @{
+            Mandatory              = $false
+            type                   = [HashtableAst], [ScriptBlockExpressionAst], [VariableExpressionAst]
+            AllowRuntimeEvaluation = $true
+        }
+    }
+}
+#endregion
 
 #region task pxDsc
 function pxDsc
@@ -367,23 +648,17 @@ function pxDsc
         [hashtable]$Body
     )
 
-    [psoxDsc]::new($Name, $Body, [psoxDscTarget])
+    [pxFatory]::CreateTask($Name, $Body, [pxDsc] , [pxWinRMTarget], $pxExecutionContext)
 }
 
-class psoxDsc : psoxTask
+class pxDsc : pxTask
 {
-    [psoxDscTarget]$Target
-
-    psoxDsc([string]$Name, [hashtable]$Parameters, [type]$TargetType) : base([string]$Name, [hashtable]$Parameters, [type]$TargetType)
-    {
-    }
-
     [void]Connect()
     {
         try
         {
             $this.LogInformation('Connect', 'Started')
-            if (-not [psoxConnectionManager]::ConnectionExist($this.Target.ConnectionId))
+            if (-not [pxConnectionManager]::ConnectionExist($this.Target.ConnectionId))
             {
                 $newPSSessionParams = @{
                     ComputerName = $this.Target.Endpoint
@@ -391,7 +666,7 @@ class psoxDsc : psoxTask
                 } + $this.Target.PSSessionParameters
                 $ses = New-PSSession @newPSSessionParams -ErrorAction Stop
                 Invoke-Command -Session $ses -ScriptBlock { $ProgressPreference = 'SilentlyContinue' }
-                [psoxConnectionManager]::AddConnection($this.Target.ConnectionId, $ses)
+                [pxConnectionManager]::AddConnection($this.Target.ConnectionId, $ses)
                 $this.LogInformation('Connect', 'Connected')
             }
             else
@@ -410,7 +685,7 @@ class psoxDsc : psoxTask
         try
         {
             $this.LogInformation('Prepare', 'Started')
-            Invoke-Command -Session ([psoxConnectionManager]::GetConnection($this.Target.ConnectionId)) -ScriptBlock {
+            Invoke-Command -Session ([pxConnectionManager]::GetConnection($this.Target.ConnectionId)) -ScriptBlock {
                 $getDscResourceParams = @{
                     Name   = $Args[0]['Resource']
                     Module = $Args[0]['Module']
@@ -419,7 +694,9 @@ class psoxDsc : psoxTask
                 if (-not $dscResExist)
                 {
                     $installModuleParams = @{
-                        Force = $true
+                        Force              = $true
+                        SkipPublisherCheck = $true
+                        AcceptLicense      = $true
                     }
                     if ($Args[0]['Module'].Contains('/'))
                     {
@@ -442,7 +719,7 @@ class psoxDsc : psoxTask
 
     [psobject]InvokeDscResource([string]$Method)
     {
-        $res = Invoke-Command -Session ([psoxConnectionManager]::GetConnection($this.Target.ConnectionId)) -ScriptBlock {
+        $res = Invoke-Command -Session ([pxConnectionManager]::GetConnection($this.Target.ConnectionId)) -ScriptBlock {
             $invokeDscResourceParams = @{
                 Method   = $Args[1]
                 Name     = $Args[0]['Resource']
@@ -500,47 +777,28 @@ class psoxDsc : psoxTask
     }
 }
 
-
-class psoxDscTarget : psoxTarget
-{
-    [hashtable]$PSSessionParameters = @{}
-
-    psoxDscTarget([hashtable]$Parameters) : base([hashtable]$Parameters)
-    {
-        if ($Parameters.ContainsKey('PSSessionParameters'))
-        {
-            $this.PSSessionParameters = $Parameters['PSSessionParameters']
-        }
-    }
-    psoxDscTarget([string]$Name) : base([string]$Name)
-    {
-    }
-}
-
 $pxDscSpec = @{
     TaskName   = 'pxDsc'
-    Syntax     = 'pxDsc <[string]Name> @{
-        Target     = [string|hashtable]
-        Resource   = [string]
-        Module     = [string]
-        Properties = [hashtable]
-    }'
+    TargetType = $pxWinRMTargetSpec.Name
+    Syntax     = "pxDsc <[string]Name> @{
+    Target     = $($pxWinRMTargetSpec.Syntax)
+    Resource   = [string]
+    Module     = [string]
+    Properties = [hashtable]
+}"
     Parameters = @{
-        Target     = @{
-            Mandatory = $true
-            Type      = [StringConstantExpressionAst], [ExpandableStringExpressionAst], [HashtableAst]
-        }
+        Target     = $pxWinRMTargetSpec.Target
         Resource   = @{
             Mandatory = $true
-            Type      = [StringConstantExpressionAst], [ExpandableStringExpressionAst]
+            Type      = [StringConstantExpressionAst], [ExpandableStringExpressionAst], [VariableExpressionAst]
         }
         Module     = @{
             Mandatory = $true
-            Type      = [StringConstantExpressionAst], [ExpandableStringExpressionAst]
+            Type      = [StringConstantExpressionAst], [ExpandableStringExpressionAst], [VariableExpressionAst]
         }
         Properties = @{
             Mandatory              = $true
-            type                   = [HashtableAst], [ScriptBlockExpressionAst], [ScriptBlockExpressionAst]
+            type                   = [HashtableAst], [ScriptBlockExpressionAst], [VariableExpressionAst]
             AllowRuntimeEvaluation = $true
         }
     }
@@ -548,5 +806,7 @@ $pxDscSpec = @{
 #endregion
 
 $pxTaskSpec = @{
-    $pxDscSpec.TaskName = $pxDscSpec
+    $pxDscSpec.TaskName    = $pxDscSpec
+    $pxRoleSpec.TaskName   = $pxRoleSpec
+    $pxScriptSpec.TaskName = $pxScriptSpec
 }

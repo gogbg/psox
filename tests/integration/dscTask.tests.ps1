@@ -6,25 +6,22 @@ if ($modulesFolder -notin ($env:PSModulePath -split $pathSeperator))
     Write-Verbose -Message 'Prepending modulesFolder directory to $env:PSModulePath'
     $env:PSModulePath = $modulesFolder, $env:PSModulePath -join $pathSeperator
 }
-Import-Module -Name psox
+Import-Module -Name psox -Force
 
 pxScenario blq {
     $Target = @{
         Name                = ''
         PSSessionParameters = @{
-            Authentication = 'Negotiate'
-            Credential     = ''
-            UseSSL         = $true
-            Port           = 5986
-            SessionOption  = New-PSSessionOption -SkipCACheck -SkipCNCheck
+            Authentication    = 'Negotiate'
+            Credential        = ''
+            UseSSL            = $true
+            Port              = 5986
+            ConfigurationName = 'PowerShell.7'
+            SessionOption     = New-PSSessionOption -SkipCACheck -SkipCNCheck
         }
     }
-
     pxDsc "Task1" @{
-        Target     = @{
-            Name                = '20.46.120.31'
-            PSSessionParameters = $sesParam
-        }
+        Target     = $Target
         Resource   = "Environment"
         Module     = 'PSDscResources'
         Properties = @{
@@ -32,6 +29,13 @@ pxScenario blq {
             Value  = 'pxTestVar01Value3'
             Ensure = 'present'
             Target = [string[]]'Process'
+        }
+    }
+    pxRole 'Role1' @{
+        FilePath   = "role1.ps1"
+        Parameters = @{
+            Target = $Target
+            Param1 = 'RoleParameterValue2'
         }
     }
     pxDsc "Download Software" @{
@@ -53,4 +57,4 @@ pxScenario blq {
             Ensure    = 'Present'
         }
     }
-} -OutVariable pxVar -Mode Test -InformationAction Continue
+} -OutVariable pxVar -Mode Set -InformationAction Continue
