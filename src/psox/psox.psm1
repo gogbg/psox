@@ -225,7 +225,7 @@ function Resolve-PsoxPath
     }
     else
     {
-        $fullPath = Join-Path ($pxExecutionContext.RootFolder) -ChildPath $Path
+        $fullPath = Join-Path $pxExecutionContext.RootFolder -ChildPath $Path
     }
     if (Test-Path -Path $fullPath)
     {
@@ -360,13 +360,15 @@ function Test-PsoxTaskDeclaration
                     {
                         $parseErrors.Add([ParseError]::new($kvp.Item2.Extent, 1, "Invalid task parameter construct: '$($kvpPureExp.GetType().Name)'. Syntax:$([System.Environment]::NewLine)$($taskSpec.Syntax)"))
                     }
-
-                    #Validate filepath
-                    if ($taskSpec.Parameters[$kvp.Item1.Value].IsFilePath)
+                    else
                     {
-                        if (-not (Test-PsoxPath -Path $kvpPureExp.Value))
+                        #Validate filepath
+                        if ($taskSpec.Parameters[$kvp.Item1.Value].IsFilePath)
                         {
-                            $parseErrors.Add([ParseError]::new($kvp.Item2.Extent, 1, "Invalid task parameter '$($kvp.Item1.Value)' value. File: '$($kvpPureExp.Value)' not found. Syntax:$([System.Environment]::NewLine)$($taskSpec.Syntax)"))
+                            if (-not (Test-PsoxPath -Path $kvpPureExp.Value))
+                            {
+                                $parseErrors.Add([ParseError]::new($kvp.Item2.Extent, 1, "Invalid task parameter '$($kvp.Item1.Value)' value. File: '$($kvpPureExp.Value)' not found. Syntax:$([System.Environment]::NewLine)$($taskSpec.Syntax)"))
+                            }
                         }
                     }
                 }
@@ -592,16 +594,23 @@ class pxScript : pxTask
         try
         {
             $this.LogInformation('Set', 'Started')
-            $scriptFile = Resolve-PsoxPath -Path $this.Parameters['FilePath']
+            #Get script content
+            $scriptFilePath = Resolve-PsoxPath -Path $this.Parameters['FilePath']
+            $scriptContent = Get-Content -Path $scriptFilePath -Raw
+
+            #Create pipeline for execution
+            $session = [pxConnectionManager]::GetConnection($this.Target.ConnectionId)
+            $pipeline = $session.Runspace.CreatePipeline()
+            $pipeline.Commands.AddScript($scriptContent)
             if ($this.Parameters.ContainsKey('Parameters'))
             {
-                $scriptParams = $this.Parameters['Parameters']
-                $this.Output = & $scriptFile @scriptParams
+                foreach ($parKey in $this.Parameters['Parameters'].Keys)
+                {
+                    $pipeline.Commands[0].Parameters.Add($parKey, $this.Parameters['Parameters'][$parKey]) 
+                }
             }
-            else
-            {
-                $this.Output = & $scriptFile
-            }
+            $this.Output = $pipeline.Invoke()
+            $pipeline.Dispose()
             $this.State.Updated = $true
             $this.LogInformation('Set', 'Completed')
         }
@@ -696,7 +705,7 @@ class pxDsc : pxTask
                     $installModuleParams = @{
                         Force              = $true
                         SkipPublisherCheck = $true
-                        AcceptLicense      = $true
+                        #AcceptLicense      = $true
                     }
                     if ($Args[0]['Module'].Contains('/'))
                     {

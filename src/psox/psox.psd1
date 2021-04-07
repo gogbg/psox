@@ -21,13 +21,13 @@
     GUID              = 'ff73a387-d979-4987-b26e-1161613d348d'
 
     # Author of this module
-    Author            = 'georgimilchevivanov'
+    Author            = 'gogbg@outlook.com'
 
     # Company or vendor of this module
     CompanyName       = 'Unknown'
 
     # Copyright statement for this module
-    Copyright         = '(c) georgimilchevivanov. All rights reserved.'
+    Copyright         = '(c) gogbg. All rights reserved.'
 
     # Description of the functionality provided by this module
     # Description = ''
@@ -51,7 +51,7 @@
     # ProcessorArchitecture = ''
 
     # Modules that must be imported into the global environment prior to importing this module
-    # RequiredModules = @()
+    RequiredModules   = @(@{ModuleName = 'AstExtensions'; RequiredVersion = '1.0.0.8' })
 
     # Assemblies that must be loaded prior to importing this module
     # RequiredAssemblies = @()
