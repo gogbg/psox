@@ -22,7 +22,6 @@ class pxTarget
     {
         return $this.DisplayName
     }
-
 }
 
 class pxTaskState
@@ -449,18 +448,18 @@ function pxScenario
 
 #region target pxWinRMTarget
 
-class pxWinRMTarget : pxTarget
-{
-    [hashtable]$PSSessionParameters = @{}
-
-    pxWinRMTarget([hashtable]$Parameters)
+    class pxWinRMTarget : pxTarget
     {
-        if ($Parameters.ContainsKey('PSSessionParameters'))
+        [hashtable]$PSSessionParameters = @{}
+
+        pxWinRMTarget([hashtable]$Parameters)
         {
-            $this.PSSessionParameters = $Parameters['PSSessionParameters']
+            if ($Parameters.ContainsKey('PSSessionParameters'))
+            {
+                $this.PSSessionParameters = $Parameters['PSSessionParameters']
+            }
         }
     }
-}
 
 $pxWinRMTargetSpec = @{
     Name   = 'pxWinRMTarget'

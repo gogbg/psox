@@ -6,21 +6,21 @@ param
     [Parameter(Mandatory)]
     [hashtable]$Target
 )
-pxScript "Task5" @{
+pxScript "Alteryx-contoller-Task1" @{
     Target     = $Target
     FilePath   = 'script01.ps1'
     Parameters = @{
         Param1 = 'SomeTestValue1231'
     }
 }
-pxDsc "Task6" @{
+pxDsc "Alteryx-contoller-Task2" @{
     Target     = $Target
     Resource   = "xRegistry"
     Module     = 'xPSDesiredStateConfiguration'
     Properties = { @{
             Key       = 'HKLM:\SOFTWARE'
             ValueName = 'Prop1'
-            ValueData = $allPxTasks.Where( { $_.Name.Name -eq 'Task5' }).Output
+            ValueData = $allPxTasks.Where( { $_.Name.Name -eq 'Alteryx-contoller-Task1' }).Output
             Ensure    = 'present'
             ValueType = 'String'
         }
